@@ -1,5 +1,3 @@
-# rtrace
-
 ## Русская версия
 
 ### Что это
@@ -371,5 +369,6 @@ It does not promise:
 In short, `rtrace` exists to safely run a suspicious ELF file inside a separate
 Linux VM, automatically collect signature and runtime artifacts, and present the
 results in a form that is easy to review.
-#   r t r a c e  
+#   r t r a c e 
+ 
  

@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>rtrace Artifacts Viewer</title>
+  <style>
+    :root {
+      --bg: #ecfaf7;
+      --panel: #ffffff;
+      --panel-2: #f4fcfa;
+      --text: #173631;
+      --muted: #5c7b75;
+      --accent: #2e8f83;
+      --warn: #d39a3d;
+      --line: #cfe4de;
+      --hit: #c35a68;
+      --node: #2a9d8f;
+      --node-sel: #e9c46a;
+      --node-stroke: #1f6f66;
+      --node-sel-stroke: #9d7220;
+      --node-text: #f4fffd;
+      --pre-bg: #f2fbf8;
+      --pre-text: #17332f;
+      --empty-text: #688983;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(1200px 700px at 10% -20%, #d7f2ec 0%, var(--bg) 62%);
+      color: var(--text);
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(6px);
+    }
+
+    .topbar button, .topbar label {
+      border: 1px solid var(--line);
+      color: var(--text);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .topbar button:hover, .topbar label:hover {
+      border-color: var(--accent);
+    }
+
+    .topbar input[type="file"] {
+      display: none;
+    }
+
+    .stats {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      min-height: 0;
+    }
+
+    .panel {
+      min-height: 0;
+      padding: 12px;
+    }
+
+    .graph-wrap {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(165deg, #ffffff, #eefaf7);
+      height: 100%;
+      min-height: 420px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hint {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid var(--line);
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .edge {
+      stroke: var(--line);
+      stroke-width: 1.4;
+      opacity: 1;
+    }
+
+    .node circle {
+      fill: var(--node);
+      stroke: var(--node-stroke);
+      stroke-width: 1.5;
+    }
+
+    .node {
+      cursor: grab;
+    }
+
+    .node.dragging {
+      cursor: grabbing;
+    }
+
+    .node.selected circle {
+      fill: var(--node-sel);
+      stroke: var(--node-sel-stroke);
+      stroke-width: 2.2;
+    }
+
+    .node text {
+      fill: var(--node-text);
+      font-size: 11px;
+      font-weight: 700;
+      pointer-events: none;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .side {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 10px;
+    }
+
+    .title {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .timeline-controls {
+      display: grid;
+      gap: 8px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    .event-list {
+      overflow: auto;
+      max-height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+
+    .event-item {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .event-item:last-child { border-bottom: 0; }
+
+    .event-item.active {
+      background: rgba(31, 143, 255, 0.12);
+      border-left: 3px solid var(--accent);
+      padding-left: 7px;
+    }
+
+    .event-item .meta {
+      color: var(--muted);
+      margin-top: 3px;
+      font-size: 11px;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: auto;
+      max-height: 360px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--pre-text);
+      background: var(--pre-bg);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 10px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      margin-right: 6px;
+    }
+
+    .badge.hit { color: #7e2b39; border-color: #e3b7be; background: rgba(195, 90, 104, 0.12); }
+    .badge.ok { color: #1f6c62; border-color: #a9d9d1; background: rgba(46, 143, 131, 0.12); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <label for="fileInput">Load JSON/meta.json</label>
+      <input id="fileInput" type="file" multiple webkitdirectory accept=".json,application/json" />
+      <button id="clearBtn" type="button">Clear</button>
+      <button id="allTimelineBtn" type="button">Timeline: all PIDs</button>
+      <div class="stats" id="stats">No data loaded</div>
+    </div>
+
+    <div class="main">
+      <div class="panel">
+        <div class="graph-wrap">
+          <div class="hint">Click PID node to inspect timeline. Drag nodes to rearrange graph.</div>
+          <svg id="graph"></svg>
+        </div>
+      </div>
+
+      <div class="panel side">
+        <div class="card">
+          <div class="title">Selected</div>
+          <div id="selectedInfo">All PIDs</div>
+        </div>
+
+        <div class="card timeline-controls">
+          <div class="title">Timeline scrub</div>
+          <input id="timelineSlider" type="range" min="0" max="0" value="0" disabled />
+          <div id="timelinePos">No events</div>
+        </div>
+
+        <div class="card">
+          <div class="title">Events</div>
+          <div class="event-list" id="eventList"></div>
+        </div>
+
+        <div class="card">
+          <div class="title">JSON event view</div>
+          <pre id="jsonView">Load artifacts to start.</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const state = {
+      snapshots: [],
+      events: [],
+      eventsByPid: new Map(),
+      currentPid: null,
+      currentEvents: [],
+      currentIndex: 0,
+      graphNodes: [],
+      graphEdges: [],
+      graphPositions: new Map(),
+      drag: null
+    };
+
+    const el = {
+      fileInput: document.getElementById("fileInput"),
+      clearBtn: document.getElementById("clearBtn"),
+      allTimelineBtn: document.getElementById("allTimelineBtn"),
+      stats: document.getElementById("stats"),
+      selectedInfo: document.getElementById("selectedInfo"),
+      timelineSlider: document.getElementById("timelineSlider"),
+      timelinePos: document.getElementById("timelinePos"),
+      eventList: document.getElementById("eventList"),
+      jsonView: document.getElementById("jsonView"),
+      graph: document.getElementById("graph")
+    };
+
+    el.fileInput.addEventListener("change", () => loadFiles(el.fileInput.files));
+    el.clearBtn.addEventListener("click", clearAll);
+    el.allTimelineBtn.addEventListener("click", () => selectPid(null));
+    el.timelineSlider.addEventListener("input", () => {
+      const index = Number(el.timelineSlider.value);
+      setCurrentEvent(index, true);
+    });
+
+    function clearAll() {
+      state.snapshots = [];
+      state.events = [];
+      state.eventsByPid = new Map();
+      state.currentPid = null;
+      state.currentEvents = [];
+      state.currentIndex = 0;
+      state.graphNodes = [];
+      state.graphEdges = [];
+      state.graphPositions = new Map();
+      state.drag = null;
+      el.fileInput.value = "";
+      renderAll();
+    }
+
+    async function loadFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) {
+        return;
+      }
+
+      const parsed = [];
+      for (const file of files) {
+        if (!file.name.toLowerCase().endsWith(".json")) {
+          continue;
+        }
+
+        try {
+          const text = await file.text();
+          const raw = JSON.parse(text);
+          const snapshot = normalizeSnapshot(raw, file);
+          if (snapshot) {
+            parsed.push(snapshot);
+          }
+        } catch (_) {
+        }
+      }
+
+      if (!parsed.length) {
+        alert("No valid rtrace snapshots found in selected files.");
+        return;
+      }
+
+      state.snapshots = parsed.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+      rebuildModel();
+      selectPid(null);
+    }
+
+    function normalizeSnapshot(raw, file) {
+      const sourceFile = file.webkitRelativePath || file.name;
+      const fromPath = parseFromPath(sourceFile);
+
+      if (raw && typeof raw === "object" && !Array.isArray(raw) && typeof raw.pid === "number") {
+        return {
+          timestamp_ms: Number(raw.timestamp_ms || fromPath.timestamp || 0),
+          pid: Number(raw.pid),
+          ppid: Number(raw.ppid || 0),
+          comm: String(raw.comm || ""),
+          exe: String(raw.exe || ""),
+          cmdline: String(raw.cmdline || ""),
+          hits: Array.isArray(raw.hits) ? raw.hits : [],
+          source_file: sourceFile,
+          tag: fromPath.tag || "unknown"
+        };
+      }
+
+      if (Array.isArray(raw)) {
+        return {
+          timestamp_ms: Number(fromPath.timestamp || 0),
+          pid: Number(fromPath.pid || -1),
+          ppid: 0,
+          comm: "",
+          exe: "",
+          cmdline: "",
+          hits: raw,
+          source_file: sourceFile,
+          tag: fromPath.tag || "unknown"
+        };
+      }
+
+      return null;
+    }
+
+    function parseFromPath(path) {
+      const m = path.match(/(\d+)_pid(\d+)_([A-Za-z0-9_-]+)/);
+      if (!m) {
+        return { timestamp: 0, pid: -1, tag: "" };
+      }
+      return {
+        timestamp: Number(m[1]),
+        pid: Number(m[2]),
+        tag: m[3]
+      };
+    }
+
+    function rebuildModel() {
+      const events = [];
+      const pidMap = new Map();
+      const edgeCount = new Map();
+
+      for (const snap of state.snapshots) {
+        upsertPid(pidMap, snap.pid, snap);
+        if (snap.ppid > 0 && snap.ppid !== snap.pid) {
+          upsertPid(pidMap, snap.ppid, null);
+          const k = snap.ppid + "->" + snap.pid;
+          edgeCount.set(k, (edgeCount.get(k) || 0) + 1);
+        }
+
+        const hits = Array.isArray(snap.hits) ? snap.hits : [];
+        if (!hits.length) {
+          events.push(buildEvent(snap, null, 0));
+        } else {
+          for (let i = 0; i < hits.length; i += 1) {
+            events.push(buildEvent(snap, hits[i], i));
+          }
+        }
+      }
+
+      events.sort((a, b) => a.timestamp_ms - b.timestamp_ms || a.hit_index - b.hit_index);
+      state.events = events;
+
+      const eventsByPid = new Map();
+      for (const ev of events) {
+        if (!eventsByPid.has(ev.pid)) {
+          eventsByPid.set(ev.pid, []);
+        }
+        eventsByPid.get(ev.pid).push(ev);
+      }
+      state.eventsByPid = eventsByPid;
+
+      const graphNodes = Array.from(pidMap.values())
+        .sort((a, b) => a.pid - b.pid);
+      const graphEdges = Array.from(edgeCount.entries()).map(([k, weight]) => {
+        const parts = k.split("->");
+        return { source: Number(parts[0]), target: Number(parts[1]), weight };
+      });
+
+      state.graphNodes = graphNodes;
+      state.graphEdges = graphEdges;
+      const nextPositions = new Map();
+      for (const node of graphNodes) {
+        if (state.graphPositions.has(node.pid)) {
+          nextPositions.set(node.pid, state.graphPositions.get(node.pid));
+        }
+      }
+      state.graphPositions = nextPositions;
+      state.drag = null;
+    }
+
+    function buildEvent(snap, hit, index) {
+      const hitObj = hit || {};
+      return {
+        timestamp_ms: Number(snap.timestamp_ms || 0),
+        time_local: toLocalTime(snap.timestamp_ms),
+        pid: snap.pid,
+        ppid: snap.ppid,
+        tag: snap.tag,
+        comm: snap.comm,
+        exe: snap.exe,
+        cmdline: snap.cmdline,
+        hit_index: index,
+        hit: hit,
+        channel: String(hitObj.channel || ""),
+        cpu_register: hitObj.cpu_register ?? null,
+        rule: String(hitObj.rule || ""),
+        class: String(hitObj.class || ""),
+        source_file: snap.source_file,
+        snapshot: snap
+      };
+    }
+
+    function upsertPid(pidMap, pid, snap) {
+      if (!pidMap.has(pid)) {
+        pidMap.set(pid, {
+          pid,
+          snapshots: 0,
+          hits: 0,
+          first_ts: Number.MAX_SAFE_INTEGER,
+          last_ts: 0
+        });
+      }
+      if (snap) {
+        const n = pidMap.get(pid);
+        n.snapshots += 1;
+        n.hits += (Array.isArray(snap.hits) ? snap.hits.length : 0);
+        n.first_ts = Math.min(n.first_ts, snap.timestamp_ms || 0);
+        n.last_ts = Math.max(n.last_ts, snap.timestamp_ms || 0);
+      }
+    }
+
+    function selectPid(pid) {
+      state.currentPid = pid;
+      if (pid === null) {
+        state.currentEvents = state.events.slice();
+      } else {
+        state.currentEvents = (state.eventsByPid.get(pid) || []).slice();
+      }
+      state.currentIndex = 0;
+      renderAll();
+    }
+
+    function setCurrentEvent(index, fromSlider) {
+      if (!state.currentEvents.length) {
+        state.currentIndex = 0;
+        renderJsonView(null);
+        return;
+      }
+      const safe = Math.max(0, Math.min(index, state.currentEvents.length - 1));
+      state.currentIndex = safe;
+      renderEventList();
+      renderTimelineControls();
+      renderJsonView(state.currentEvents[safe]);
+      if (!fromSlider) {
+        el.timelineSlider.value = String(safe);
+      }
+    }
+
+    function renderAll() {
+      renderStats();
+      renderGraph();
+      renderSelectedInfo();
+      renderTimelineControls();
+      renderEventList();
+      renderJsonView(state.currentEvents[state.currentIndex] || null);
+    }
+
+    function renderStats() {
+      if (!state.snapshots.length) {
+        el.stats.textContent = "No data loaded";
+        return;
+      }
+      const pids = state.graphNodes.length;
+      const snaps = state.snapshots.length;
+      const hits = state.events.filter(e => e.hit).length;
+      el.stats.textContent = `PIDs: ${pids} | snapshots: ${snaps} | hits: ${hits}`;
+    }
+
+    function renderSelectedInfo() {
+      if (state.currentPid === null) {
+        el.selectedInfo.innerHTML = `<span class="badge ok">all</span>Timeline for all PIDs`;
+        return;
+      }
+      const node = state.graphNodes.find(n => n.pid === state.currentPid);
+      if (!node) {
+        el.selectedInfo.textContent = "PID not found";
+        return;
+      }
+      el.selectedInfo.innerHTML =
+        `<span class="badge hit">PID ${node.pid}</span>` +
+        `<span class="badge">snapshots: ${node.snapshots}</span>` +
+        `<span class="badge">hits: ${node.hits}</span>`;
+    }
+
+    function renderTimelineControls() {
+      const count = state.currentEvents.length;
+      if (!count) {
+        el.timelineSlider.disabled = true;
+        el.timelineSlider.min = "0";
+        el.timelineSlider.max = "0";
+        el.timelineSlider.value = "0";
+        el.timelinePos.textContent = "No events";
+        return;
+      }
+      el.timelineSlider.disabled = false;
+      el.timelineSlider.min = "0";
+      el.timelineSlider.max = String(count - 1);
+      el.timelineSlider.value = String(state.currentIndex);
+      const cur = state.currentEvents[state.currentIndex];
+      el.timelinePos.textContent =
+        `${state.currentIndex + 1}/${count} | ${cur.time_local} | PID ${cur.pid} | ${cur.channel || "NO-HIT"}`;
+    }
+
+    function renderEventList() {
+      const items = state.currentEvents;
+      el.eventList.innerHTML = "";
+      if (!items.length) {
+        const div = document.createElement("div");
+        div.className = "event-item";
+        div.textContent = "No events in selected timeline.";
+        el.eventList.appendChild(div);
+        return;
+      }
+
+      for (let i = 0; i < items.length; i += 1) {
+        const e = items[i];
+        const div = document.createElement("div");
+        div.className = "event-item" + (i === state.currentIndex ? " active" : "");
+        const title = `${e.time_local} | PID ${e.pid} | ${e.rule || "snapshot"}`;
+        const reg = e.cpu_register ? ` | reg: ${e.cpu_register}` : "";
+        div.innerHTML = `<div>${escapeHtml(title)}</div><div class="meta">channel=${escapeHtml(e.channel || "-")}${escapeHtml(reg)} | tag=${escapeHtml(e.tag || "-")}</div>`;
+        div.addEventListener("click", () => setCurrentEvent(i, false));
+        el.eventList.appendChild(div);
+      }
+    }
+
+    function renderJsonView(eventObj) {
+      if (!eventObj) {
+        el.jsonView.textContent = "No event selected.";
+        return;
+      }
+      const view = {
+        timestamp_ms: eventObj.timestamp_ms,
+        time_local: eventObj.time_local,
+        pid: eventObj.pid,
+        ppid: eventObj.ppid,
+        tag: eventObj.tag,
+        comm: eventObj.comm,
+        exe: eventObj.exe,
+        cmdline: eventObj.cmdline,
+        source_file: eventObj.source_file,
+        hit_index: eventObj.hit_index,
+        hit: eventObj.hit
+      };
+      el.jsonView.textContent = JSON.stringify(view, null, 2);
+    }
+
+    function renderGraph() {
+      const svg = el.graph;
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+      const width = svg.clientWidth || 800;
+      const height = svg.clientHeight || 600;
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+      if (!state.graphNodes.length) {
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", String(width / 2));
+        txt.setAttribute("y", String(height / 2));
+        txt.setAttribute("fill", "#688983");
+        txt.setAttribute("text-anchor", "middle");
+        txt.setAttribute("font-size", "14");
+        txt.textContent = "Load meta.json files to build graph";
+        svg.appendChild(txt);
+        return;
+      }
+
+      const { positions: layoutPositions } = layoutGraph(state.graphNodes, state.graphEdges, width, height);
+      for (const node of state.graphNodes) {
+        if (!state.graphPositions.has(node.pid)) {
+          state.graphPositions.set(node.pid, layoutPositions.get(node.pid));
+        }
+      }
+
+      const nodeRadius = 26;
+      const arrowInset = 8;
+      const edgeRefsByPid = new Map();
+      const nodeRefs = new Map();
+      const radiusByPid = new Map();
+
+      for (const node of state.graphNodes) {
+        radiusByPid.set(node.pid, nodeRadius);
+      }
+
+      const ensureEdgeRefList = pid => {
+        if (!edgeRefsByPid.has(pid)) {
+          edgeRefsByPid.set(pid, []);
+        }
+        return edgeRefsByPid.get(pid);
+      };
+
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", "graph-arrowhead");
+      marker.setAttribute("markerWidth", "10");
+      marker.setAttribute("markerHeight", "10");
+      marker.setAttribute("refX", "8");
+      marker.setAttribute("refY", "5");
+      marker.setAttribute("orient", "auto");
+      marker.setAttribute("markerUnits", "userSpaceOnUse");
+      const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      markerPath.setAttribute("d", "M 0 0 L 8 5 L 0 10 z");
+      markerPath.setAttribute("fill", "var(--muted)");
+      marker.appendChild(markerPath);
+      defs.appendChild(marker);
+      svg.appendChild(defs);
+
+      const updateEdgeLine = edgeRef => {
+        const a = state.graphPositions.get(edgeRef.source);
+        const b = state.graphPositions.get(edgeRef.target);
+        if (!a || !b) {
+          return;
+        }
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const sourceRadius = radiusByPid.get(edgeRef.source) || nodeRadius;
+        const targetRadius = radiusByPid.get(edgeRef.target) || nodeRadius;
+        edgeRef.line.setAttribute("x1", String(a.x + ux * sourceRadius));
+        edgeRef.line.setAttribute("y1", String(a.y + uy * sourceRadius));
+        edgeRef.line.setAttribute("x2", String(b.x - ux * (targetRadius + arrowInset)));
+        edgeRef.line.setAttribute("y2", String(b.y - uy * (targetRadius + arrowInset)));
+      };
+
+      const updateNodePosition = pid => {
+        const pos = state.graphPositions.get(pid);
+        const nodeRef = nodeRefs.get(pid);
+        if (!pos || !nodeRef) {
+          return;
+        }
+        nodeRef.setAttribute("transform", `translate(${pos.x},${pos.y})`);
+        for (const edgeRef of edgeRefsByPid.get(pid) || []) {
+          updateEdgeLine(edgeRef);
+        }
+      };
+
+      for (const edge of state.graphEdges) {
+        const a = state.graphPositions.get(edge.source);
+        const b = state.graphPositions.get(edge.target);
+        if (!a || !b) {
+          continue;
+        }
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("class", "edge");
+        line.setAttribute("marker-end", "url(#graph-arrowhead)");
+        const edgeRef = {
+          source: edge.source,
+          target: edge.target,
+          line
+        };
+        ensureEdgeRefList(edge.source).push(edgeRef);
+        ensureEdgeRefList(edge.target).push(edgeRef);
+        updateEdgeLine(edgeRef);
+        svg.appendChild(line);
+      }
+
+      for (const node of state.graphNodes) {
+        const p = state.graphPositions.get(node.pid);
+        if (!p) {
+          continue;
+        }
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("class", "node" + (state.currentPid === node.pid ? " selected" : ""));
+        g.setAttribute("transform", `translate(${p.x},${p.y})`);
+
+        const r = nodeRadius;
+        radiusByPid.set(node.pid, r);
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("r", String(r));
+        g.appendChild(c);
+
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.textContent = String(node.pid);
+        g.appendChild(t);
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `PID ${node.pid}\nSnapshots: ${node.snapshots}\nHits: ${node.hits}`;
+        g.appendChild(title);
+
+        g.addEventListener("pointerdown", event => {
+          if (event.button !== 0) {
+            return;
+          }
+          event.preventDefault();
+          const point = eventToSvgPoint(event, svg);
+          const current = state.graphPositions.get(node.pid);
+          if (!current) {
+            return;
+          }
+          state.drag = {
+            pid: node.pid,
+            pointerId: event.pointerId,
+            moved: false,
+            offsetX: point.x - current.x,
+            offsetY: point.y - current.y
+          };
+          g.classList.add("dragging");
+          g.setPointerCapture(event.pointerId);
+        });
+
+        g.addEventListener("pointermove", event => {
+          if (!state.drag || state.drag.pid !== node.pid || state.drag.pointerId !== event.pointerId) {
+            return;
+          }
+          event.preventDefault();
+          const point = eventToSvgPoint(event, svg);
+          const radius = radiusByPid.get(node.pid) || 24;
+          const nextX = clamp(point.x - state.drag.offsetX, radius + 4, width - radius - 4);
+          const nextY = clamp(point.y - state.drag.offsetY, radius + 4, height - radius - 4);
+          const current = state.graphPositions.get(node.pid);
+          if (!current) {
+            return;
+          }
+          if (Math.abs(nextX - current.x) > 1 || Math.abs(nextY - current.y) > 1) {
+            state.drag.moved = true;
+          }
+          state.graphPositions.set(node.pid, { x: nextX, y: nextY });
+          updateNodePosition(node.pid);
+        });
+
+        const finishDrag = event => {
+          if (!state.drag || state.drag.pid !== node.pid || state.drag.pointerId !== event.pointerId) {
+            return;
+          }
+          const moved = state.drag.moved;
+          state.drag = null;
+          g.classList.remove("dragging");
+          if (g.hasPointerCapture(event.pointerId)) {
+            g.releasePointerCapture(event.pointerId);
+          }
+          if (!moved) {
+            selectPid(node.pid);
+          }
+        };
+
+        g.addEventListener("pointerup", finishDrag);
+        g.addEventListener("pointercancel", finishDrag);
+        nodeRefs.set(node.pid, g);
+        svg.appendChild(g);
+      }
+    }
+
+    function layoutGraph(nodes, edges, width, height) {
+      const parentOf = new Map();
+      const outgoing = new Map();
+      const indeg = new Map();
+
+      for (const n of nodes) {
+        outgoing.set(n.pid, []);
+        indeg.set(n.pid, 0);
+      }
+
+      for (const e of edges) {
+        if (!outgoing.has(e.source) || !outgoing.has(e.target)) {
+          continue;
+        }
+        outgoing.get(e.source).push(e.target);
+        indeg.set(e.target, (indeg.get(e.target) || 0) + 1);
+        parentOf.set(e.target, e.source);
+      }
+
+      let roots = nodes.filter(n => (indeg.get(n.pid) || 0) === 0).map(n => n.pid);
+      if (!roots.length) {
+        roots = [nodes[0].pid];
+      }
+
+      const level = new Map();
+      const queue = roots.map(r => ({ pid: r, lvl: 0 }));
+      while (queue.length) {
+        const cur = queue.shift();
+        if (level.has(cur.pid)) {
+          continue;
+        }
+        level.set(cur.pid, cur.lvl);
+        const next = outgoing.get(cur.pid) || [];
+        for (const child of next) {
+          queue.push({ pid: child, lvl: cur.lvl + 1 });
+        }
+      }
+
+      for (const n of nodes) {
+        if (!level.has(n.pid)) {
+          level.set(n.pid, 0);
+        }
+      }
+
+      const maxLvl = Math.max(...Array.from(level.values()));
+      const byLevel = new Map();
+      for (const n of nodes) {
+        const l = level.get(n.pid);
+        if (!byLevel.has(l)) {
+          byLevel.set(l, []);
+        }
+        byLevel.get(l).push(n.pid);
+      }
+
+      const positions = new Map();
+      const topPad = 40;
+      const leftPad = 36;
+      const graphW = width - leftPad * 2;
+      const graphH = height - topPad * 2;
+      for (let l = 0; l <= maxLvl; l += 1) {
+        const arr = (byLevel.get(l) || []).sort((a, b) => a - b);
+        const y = topPad + (maxLvl === 0 ? graphH / 2 : (graphH * l) / maxLvl);
+        for (let i = 0; i < arr.length; i += 1) {
+          const x = leftPad + graphW * ((i + 1) / (arr.length + 1));
+          positions.set(arr[i], { x, y });
+        }
+      }
+
+      return { positions };
+    }
+
+    function toLocalTime(ts) {
+      const num = Number(ts || 0);
+      if (!num) {
+        return "n/a";
+      }
+      const d = new Date(num);
+      const p = (v, n = 2) => String(v).padStart(n, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+    }
+
+    function eventToSvgPoint(event, svg) {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const matrix = svg.getScreenCTM();
+      if (!matrix) {
+        return { x: 0, y: 0 };
+      }
+      const transformed = point.matrixTransform(matrix.inverse());
+      return {
+        x: transformed.x,
+        y: transformed.y
+      };
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    renderAll();
+  </script>
+</body>
+</html>

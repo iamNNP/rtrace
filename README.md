@@ -1,95 +1,68 @@
 # rtrace
 
+Инструмент для первичного анализа ELF-файлов под Linux в изолированной VM.
+
+---
+
 ## Русская версия
 
 ### Что это
 
-`rtrace` - это инструмент для первичного анализа подозрительных ELF-файлов под Linux.
-Он запускает образец в изолированной виртуальной машине, проверяет файл и память
-процесса по YARA-правилам, а затем сохраняет результат в понятном виде.
+`rtrace` нужен для простой задачи: взять подозрительный ELF-файл, запустить его не на хосте, а в отдельной Linux VM, и посмотреть, что нашлось по YARA в файле и в памяти процесса.
 
-Проект сделан как Blue Team решение: его задача не атаковать систему, а помочь
-безопасно проверить подозрительный файл и быстрее понять, что именно он делает.
+На выходе проект пишет JSON-артефакты и показывает находки через MITRE ATT&CK.
 
-### Зачем нужен
+### Когда он полезен
 
-Обычный статический анализ не всегда видит строки и данные, которые раскрываются
-только во время работы программы. Запускать неизвестный ELF-файл прямо на хосте
-тоже небезопасно. `rtrace` решает обе проблемы:
+`rtrace` подходит, если нужно:
 
-- запускает образец в Linux VM, а не на основной системе
-- проверяет не только сам файл, но и память процесса
-- сохраняет артефакты для последующего разбора
-- показывает находки через MITRE ATT&CK
-- может остановить процесс сразу после нового срабатывания
+- безопасно проверить подозрительный ELF
+- быстро показать demo runtime-анализа
+- посмотреть, что появляется только в памяти
+- сохранить результат в читаемом виде
+- остановить процесс после первого нового хита
 
-### Что умеет
+Это не “антивирус на все случаи жизни” и не полноценная песочница. Это компактный стенд для первичного разбора.
 
-- изолированно запускать подозрительные ELF-файлы в Linux VM
-- сканировать исполняемый файл на диске (`FILE`)
-- сканировать читаемую память процесса (`MEM`)
-- по возможности проверять память по указателям из CPU-регистров (`REG`)
-- записывать JSON-артефакты с описанием найденных совпадений
-- сопоставлять находки с тактиками и техниками MITRE ATT&CK
-- работать в режиме `--stop-on-hit`, если нужно сразу остановить процесс
+### Что он делает
 
-### Что получится в итоге
+- запускает образец в Linux VM
+- проверяет файл на диске (`FILE`)
+- проверяет читаемую память процесса (`MEM`)
+- по возможности связывает находки с регистрами (`REG`)
+- сохраняет `meta.json`
+- добавляет MITRE ATT&CK mapping
+- умеет работать с `--stop-on-hit`
 
-После запуска пользователь получает:
+### Что нужно
 
-- каталог `artifacts/` с файлами `meta.json`
-- информацию о процессе: `pid`, `ppid`, путь к файлу, командную строку
-- список найденных сигнатур
-- канал обнаружения: `FILE`, `MEM` или `REG`
-- адрес, смещение и совпавшие байты
-- сопоставление с MITRE ATT&CK
-- просмотр результатов в локальном WebUI
-
-### Для кого проект
-
-`rtrace` рассчитан на:
-
-- исследователей вредоносного ПО
-- Blue Team и SOC-аналитиков
-- студентов и школьников, которые изучают анализ ELF-файлов
-- тех, кому нужен воспроизводимый стенд для демонстрации runtime-анализа
-
-### Что нужно для запуска
-
-На практике удобнее всего использовать такой стенд:
+Хост:
 
 - Windows
 - WSL2
-- Ubuntu внутри WSL
-- установленный Rust в Ubuntu
-- установленный QEMU в Ubuntu
-- SSH-клиент на Windows
+- SSH-клиент
+
+Внутри WSL:
+
+- Ubuntu
+- Rust
+- QEMU
 
 ### Быстрый старт
 
-#### 1. Подготовить виртуальную машину
+#### 1. Подготовить VM
 
 ```powershell
 .\scripts\sandbox\windows\prepare_vm.ps1
 ```
 
-#### 2. Запустить VM и подготовить образец
-
-Рекомендуемый демонстрационный образец:
+#### 2. Запустить VM с demo-образцом
 
 ```powershell
 .\scripts\sandbox\windows\start_vm.ps1 -SampleBinary linux_rat_demo -DisplayBackend none
 ```
 
-Скрипт сам:
-
-- соберет `rtrace-agent`
-- положит образец в `samples/`
-- запустит Linux VM
-- смонтирует `/rules`, `/samples`, `/artifacts`
-- откроет SSH на `127.0.0.1:2222`
-
-#### 3. Подключиться к VM
+#### 3. Подключиться в гостевую систему
 
 ```powershell
 ssh -o StrictHostKeyChecking=no -p 2222 ubuntu@127.0.0.1
@@ -101,89 +74,91 @@ ssh -o StrictHostKeyChecking=no -p 2222 ubuntu@127.0.0.1
 rtrace
 ```
 
-#### 4. Запустить агент внутри VM
+#### 4. Запустить агент
 
 ```bash
 sudo /samples/rtrace-agent --rules-dir /rules --samples-dir /samples --artifacts-dir /artifacts --scan-interval-ms 300 --verbose
 ```
 
-Если нужен режим активной остановки:
+Если нужен режим остановки процесса:
 
 ```bash
 sudo /samples/rtrace-agent --rules-dir /rules --samples-dir /samples --artifacts-dir /artifacts --scan-interval-ms 300 --verbose --stop-on-hit
 ```
 
-#### 5. Запустить образец
+#### 5. Запустить sample
 
-Во второй консоли VM:
+Во второй консоли:
 
 ```bash
 /samples/linux_rat_demo
 ```
 
-#### 6. Посмотреть артефакты на хосте
+#### 6. Посмотреть результат
+
+На хосте:
 
 ```powershell
 Get-ChildItem .\artifacts -Recurse -Filter meta.json | Sort-Object LastWriteTime | Select-Object FullName
 ```
 
-Посмотреть последний артефакт:
+Последний артефакт:
 
 ```powershell
 Get-Content (Get-ChildItem .\artifacts -Recurse -Filter meta.json | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 ```
 
-#### 7. Открыть WebUI
+WebUI:
 
 ```powershell
 start .\webui\artifacts_viewer.html
 ```
 
-После этого в браузере можно загрузить папку `artifacts/`.
+### Что лежит в артефактах
 
-### Какие образцы уже есть
+В `artifacts/` появляются каталоги со снапшотами. Внутри каждого есть `meta.json`.
 
-В репозитории уже лежат демонстрационные ELF-файлы:
+В нем обычно есть:
 
-- `linux_rat_demo` - Linux-ориентированный пример с parent/child процессами
-- `runtime_noncrypto_multisig` - широкий набор non-crypto сигнатур
-- `runtime_multisig` - смешанный multi-signature пример
-- `runtime_mem_hit` - минимальная проверка memory-only сценария
-- `runtime_eicar` - контрольный тест
+- `pid`, `ppid`
+- путь к файлу и командная строка
+- имя правила
+- канал `FILE`, `MEM` или `REG`
+- адрес и смещение
+- совпавшие байты
+- ATT&CK mapping
 
-### Где что лежит
+### Демонстрационные образцы
 
-- `src/` - исходный код на Rust
-- `rules/` - YARA-правила
-- `scripts/sandbox/windows/` - подготовка и запуск VM
-- `scripts/sandbox/linux/` - вспомогательные guest-side скрипты
-- `webui/artifacts_viewer.html` - просмотр результатов в браузере
-- `tmp/bins/` - демонстрационные бинарные файлы
-- `artifacts/` - результаты анализа
+Основные встроенные sample:
 
-### Что важно понимать
+- `linux_rat_demo` — Linux-ориентированный демонстрационный сценарий
+- `runtime_noncrypto_multisig` — широкий набор non-crypto сигнатур
+- `runtime_multisig` — несколько разных хитов за один запуск
+- `runtime_mem_hit` — минимальный memory-only сценарий
+- `runtime_eicar` — контрольный пример
+- `clean_baseline` — “чистый” ELF без ожидаемых хитов
 
-`rtrace` - это не промышленная песочница и не полноценная EDR-система.
-Это исследовательский и учебный стенд для первичного runtime-анализа.
+### Куда смотреть в репозитории
 
-Проект хорошо подходит для:
+- `src/` — код на Rust
+- `rules/` — YARA-правила
+- `scripts/sandbox/windows/` — запуск и подготовка VM
+- `scripts/sandbox/linux/` — helper-скрипты внутри гостя
+- `webui/` — просмотр артефактов
+- `tmp/bins/` — demo-бинарники
+- `artifacts/` — результат анализа
 
-- демонстрации анализа ELF-файлов
-- проверки YARA-правил
-- записи артефактов
-- объяснения TTP через MITRE ATT&CK
+### Ограничения
 
-Но он не обещает:
+У проекта есть границы:
 
-- полного обхода anti-analysis техник
-- покрытия всех семейств Linux-вредоносного ПО
-- замены полноценной malware sandbox-платформы
+- это не production sandbox
+- это не EDR
+- он зависит от набора YARA-правил
+- он не обещает полный обход anti-analysis техник
 
-### Главная идея проекта
-
-Если коротко, `rtrace` нужен для того, чтобы безопасно запустить подозрительный
-ELF-файл в отдельной Linux VM, автоматически собрать сигнатурные и runtime-артефакты
-и представить результат в удобном для анализа виде.
+Нормальный способ воспринимать `rtrace` — как удобный стенд для первичного анализа и демонстрации.
 
 ---
 
@@ -191,92 +166,61 @@ ELF-файл в отдельной Linux VM, автоматически собр
 
 ### What It Is
 
-`rtrace` is a tool for primary analysis of suspicious Linux ELF binaries.
-It runs a sample inside an isolated virtual machine, scans the file and the
-process memory with YARA rules, and then saves the results in a readable form.
+`rtrace` is a small tool for primary analysis of suspicious Linux ELF binaries.
 
-This is a Blue Team project. Its goal is not to attack a system, but to help
-an analyst safely inspect a suspicious file and quickly understand what it does.
+The idea is simple: run a sample inside a separate Linux VM instead of on the host, scan the file and process memory with YARA, and save the results as JSON artifacts.
 
-### Why It Exists
+### When It Is Useful
 
-Static analysis does not always see strings or data that only appear during
-execution. Running an unknown ELF file directly on the host is also unsafe.
-`rtrace` addresses both problems:
+Use `rtrace` when you want to:
 
-- it runs the sample inside a Linux VM instead of on the host
-- it scans not only the file itself, but also the process memory
-- it stores artifacts for later review
-- it maps findings to MITRE ATT&CK
-- it can stop the process on the first new hit
+- inspect a suspicious ELF more safely
+- demonstrate runtime analysis
+- catch strings that only appear in memory
+- save findings in a readable form
+- stop a process after the first new hit
 
-### What It Can Do
+It is not a full antivirus and not a full sandbox. It is a compact lab environment for primary analysis.
 
-- run suspicious ELF files in an isolated Linux VM
-- scan the executable file on disk (`FILE`)
-- scan readable process memory (`MEM`)
-- optionally inspect memory referenced by CPU registers (`REG`)
-- save structured JSON artifacts
-- map findings to MITRE ATT&CK tactics and techniques
-- stop the process with `--stop-on-hit` if needed
+### What It Does
 
-### What You Get
+- runs a sample in a Linux VM
+- scans the executable on disk (`FILE`)
+- scans readable process memory (`MEM`)
+- optionally correlates hits with CPU registers (`REG`)
+- saves `meta.json`
+- adds MITRE ATT&CK mapping
+- supports `--stop-on-hit`
 
-After a run, the user gets:
+### Requirements
 
-- an `artifacts/` directory with `meta.json` files
-- process information such as `pid`, `ppid`, executable path, and command line
-- a list of detected signatures
-- the detection channel: `FILE`, `MEM`, or `REG`
-- address, offset, and matched bytes
-- MITRE ATT&CK mapping
-- a local WebUI for browsing results
-
-### Who This Is For
-
-`rtrace` is useful for:
-
-- malware researchers
-- Blue Team and SOC analysts
-- students learning ELF analysis
-- anyone who needs a reproducible runtime-analysis demo environment
-
-### What You Need
-
-The most practical setup is:
+Host:
 
 - Windows
 - WSL2
-- Ubuntu inside WSL
-- Rust installed in Ubuntu
-- QEMU installed in Ubuntu
-- an SSH client on Windows
+- SSH client
+
+Inside WSL:
+
+- Ubuntu
+- Rust
+- QEMU
 
 ### Quick Start
 
-#### 1. Prepare the virtual machine
+#### 1. Prepare the VM
 
 ```powershell
 .\scripts\sandbox\windows\prepare_vm.ps1
 ```
 
-#### 2. Start the VM and stage a sample
-
-Recommended demo sample:
+#### 2. Start the VM with a demo sample
 
 ```powershell
 .\scripts\sandbox\windows\start_vm.ps1 -SampleBinary linux_rat_demo -DisplayBackend none
 ```
 
-This script will:
-
-- build `rtrace-agent`
-- place the sample into `samples/`
-- start the Linux VM
-- mount `/rules`, `/samples`, and `/artifacts`
-- expose SSH on `127.0.0.1:2222`
-
-#### 3. Connect to the VM
+#### 3. Connect to the guest
 
 ```powershell
 ssh -o StrictHostKeyChecking=no -p 2222 ubuntu@127.0.0.1
@@ -288,7 +232,7 @@ Default password:
 rtrace
 ```
 
-#### 4. Run the agent inside the VM
+#### 4. Run the agent
 
 ```bash
 sudo /samples/rtrace-agent --rules-dir /rules --samples-dir /samples --artifacts-dir /artifacts --scan-interval-ms 300 --verbose
@@ -302,72 +246,74 @@ sudo /samples/rtrace-agent --rules-dir /rules --samples-dir /samples --artifacts
 
 #### 5. Run the sample
 
-In a second VM shell:
+In a second shell:
 
 ```bash
 /samples/linux_rat_demo
 ```
 
-#### 6. Review artifacts on the host
+#### 6. Review the output
+
+On the host:
 
 ```powershell
 Get-ChildItem .\artifacts -Recurse -Filter meta.json | Sort-Object LastWriteTime | Select-Object FullName
 ```
 
-Show the latest artifact:
+Latest artifact:
 
 ```powershell
 Get-Content (Get-ChildItem .\artifacts -Recurse -Filter meta.json | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 ```
 
-#### 7. Open the WebUI
+WebUI:
 
 ```powershell
 start .\webui\artifacts_viewer.html
 ```
 
-Then load the `artifacts/` directory in the browser.
+### What You Get
 
-### Included Demo Samples
+The `artifacts/` directory contains snapshot folders with `meta.json`.
 
-The repository already includes several demo ELF files:
+A typical artifact includes:
 
-- `linux_rat_demo` - a Linux-oriented parent/child process scenario
-- `runtime_noncrypto_multisig` - broader non-crypto signature coverage
-- `runtime_multisig` - a mixed multi-signature example
-- `runtime_mem_hit` - a minimal memory-only scenario
-- `runtime_eicar` - a simple control test
+- `pid`, `ppid`
+- executable path and command line
+- matched rule
+- detection channel: `FILE`, `MEM`, or `REG`
+- address and offset
+- matched bytes
+- ATT&CK mapping
+
+### Demo Samples
+
+Main built-in samples:
+
+- `linux_rat_demo`
+- `runtime_noncrypto_multisig`
+- `runtime_multisig`
+- `runtime_mem_hit`
+- `runtime_eicar`
+- `clean_baseline`
 
 ### Repository Layout
 
-- `src/` - Rust source code
-- `rules/` - YARA rules
-- `scripts/sandbox/windows/` - VM preparation and startup
-- `scripts/sandbox/linux/` - guest-side helper scripts
-- `webui/artifacts_viewer.html` - browser-based artifact viewer
-- `tmp/bins/` - demo binaries
-- `artifacts/` - analysis output
+- `src/` — Rust code
+- `rules/` — YARA rules
+- `scripts/sandbox/windows/` — VM preparation and startup
+- `scripts/sandbox/linux/` — guest-side helpers
+- `webui/` — artifact viewer
+- `tmp/bins/` — demo binaries
+- `artifacts/` — analysis output
 
-### Important Notes
+### Limits
 
-`rtrace` is not a full production sandbox and not a full EDR platform.
-It is a research and educational environment for primary runtime analysis.
+`rtrace` has clear limits:
 
-It is well suited for:
+- it is not a production sandbox
+- it is not an EDR
+- it depends on the YARA rule set
+- it does not claim full anti-analysis coverage
 
-- demonstrating ELF analysis
-- validating YARA rules
-- recording artifacts
-- explaining TTP through MITRE ATT&CK
-
-It does not promise:
-
-- full anti-analysis bypass coverage
-- coverage of every Linux malware family
-- replacement of a complete malware sandbox platform
-
-### Main Idea
-
-In short, `rtrace` exists to safely run a suspicious ELF file inside a separate
-Linux VM, automatically collect signature and runtime artifacts, and present the
-results in a form that is easy to review.
+The right way to treat it is as a practical lab tool for primary ELF runtime analysis.
